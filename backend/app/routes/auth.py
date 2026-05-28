@@ -1,5 +1,7 @@
 from fastapi import APIRouter
-
+from fastapi import Depends
+from app.middleware.auth_middleware import get_current_user
+from app.middleware.auth_middleware import get_current_user
 from app.schemas.user_schema import (
     UserSignup,
     UserLogin
@@ -77,4 +79,11 @@ def login(user: UserLogin):
     return {
         "access_token": token,
         "token_type": "bearer"
+    }
+@router.get("/profile")
+def profile(current_user: dict = Depends(get_current_user)):
+
+    return {
+        "message": "Profile fetched successfully",
+        "user": current_user
     }

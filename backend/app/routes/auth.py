@@ -1,7 +1,17 @@
 from fastapi import APIRouter
-from app.schemas.user_schema import UserSignup
+
+from app.schemas.user_schema import (
+    UserSignup,
+    UserLogin
+)
+
 from app.config.db import db
-from app.services.auth_service import hash_password
+
+from app.services.auth_service import (
+    hash_password,
+    verify_password,
+    create_access_token
+)
 
 router = APIRouter()
 
@@ -20,7 +30,9 @@ def signup(user: UserSignup):
             "message": "Email already exists"
         }
 
-    hashed_password = hash_password(user.password)
+    hashed_password = hash_password(
+        user.password
+    )
 
     user_data = {
         "name": user.name,
@@ -32,4 +44,37 @@ def signup(user: UserSignup):
 
     return {
         "message": "User created successfully"
+    }
+
+
+@router.post("/login")
+def login(user: UserLogin):
+
+    existing_user = users_collection.find_one({
+        "email": user.email
+    })
+
+    if not existing_user:
+        return {
+            "message": "Invalid email"
+        }
+
+    password_correct = verify_password(
+        user.password,
+        existing_user["password"]
+    )
+
+    if not password_correct:
+        return {
+            "message": "Invalid password"
+        }
+
+    token = create_access_token({
+        "user_id": str(existing_user["_id"]),
+        "email": existing_user["email"]
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer"
     }

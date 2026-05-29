@@ -24,13 +24,14 @@ export default function Sidebar() {
 
       <div className="flex flex-col gap-4">
 
+      <Link href="/dashboard">
+        Dashboard
+      </Link>
+
         <Link href="/profile">
           Profile
         </Link>
 
-        <Link href="/settings">
-          Settings
-        </Link>
 
         <button
           onClick={handleLogout}

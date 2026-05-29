@@ -28,6 +28,10 @@ export default function Sidebar() {
         Dashboard
       </Link>
 
+<Link href="/instant-connect">
+  Instant Connect
+</Link>
+
         <Link href="/profile">
           Profile
         </Link>

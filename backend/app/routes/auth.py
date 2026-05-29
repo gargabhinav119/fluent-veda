@@ -4,9 +4,9 @@ from app.middleware.auth_middleware import get_current_user
 from app.middleware.auth_middleware import get_current_user
 from app.schemas.user_schema import (
     UserSignup,
-    UserLogin
+    UserLogin,
+    ProfileUpdate
 )
-
 from app.config.db import db
 
 from app.services.auth_service import (
@@ -39,9 +39,12 @@ def signup(user: UserSignup):
     user_data = {
         "name": user.name,
         "email": user.email,
-        "password": hashed_password
-    }
+        "password": hashed_password,
 
+        "phone": "",
+        "interested_in": "",
+        "tagline": ""
+    }
     users_collection.insert_one(user_data)
 
     return {
@@ -86,4 +89,28 @@ def profile(current_user: dict = Depends(get_current_user)):
     return {
         "message": "Profile fetched successfully",
         "user": current_user
+    }
+
+@router.put("/profile")
+def update_profile(
+    profile: ProfileUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+
+    users_collection.update_one(
+        {
+            "email": current_user["email"]
+        },
+        {
+            "$set": {
+                "name": profile.name,
+                "phone": profile.phone,
+                "interested_in": profile.interested_in,
+                "tagline": profile.tagline
+            }
+        }
+    )
+
+    return {
+        "message": "Profile updated successfully"
     }

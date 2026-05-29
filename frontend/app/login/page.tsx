@@ -2,9 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+
 export default function LoginPage() {
-  
-    const router = useRouter();
+
+  const router = useRouter();
+
+  const { setIsLoggedIn } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -37,9 +42,9 @@ export default function LoginPage() {
         data.access_token
       );
 
-      alert("Login successful");
-        router.push("/profile");
+      setIsLoggedIn(true);
 
+      router.push("/profile");
 
     } else {
 

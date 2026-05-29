@@ -2,6 +2,8 @@ from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from dotenv import load_dotenv
+from bson import ObjectId
+from app.config.db import db
 import os
 
 load_dotenv()
@@ -27,7 +29,27 @@ def get_current_user(
             algorithms=[ALGORITHM]
         )
 
-        return payload
+        user_id = payload.get("user_id")
+
+        user = db.users.find_one({
+            "_id": ObjectId(user_id)
+        })
+
+        if not user:
+
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        return {
+            "user_id": str(user["_id"]),
+            "name": user.get("name", ""),
+            "email": user.get("email", ""),
+            "phone": user.get("phone", ""),
+            "interested_in": user.get("interested_in", ""),
+            "tagline": user.get("tagline", "")
+        }
 
     except JWTError:
 

@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr
+from typing import Optional
 
 
 class UserSignup(BaseModel):
@@ -17,3 +18,4 @@ class ProfileUpdate(BaseModel):
     phone: str
     interested_in: str
     tagline: str
+    gender: Optional[str] = None

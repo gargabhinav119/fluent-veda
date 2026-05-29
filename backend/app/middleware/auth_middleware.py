@@ -48,7 +48,11 @@ def get_current_user(
             "email": user.get("email", ""),
             "phone": user.get("phone", ""),
             "interested_in": user.get("interested_in", ""),
-            "tagline": user.get("tagline", "")
+            "tagline": user.get("tagline", ""),
+            "gender": user.get("gender", ""),
+            "honour": user.get("honour", 50)
+
+
         }
 
     except JWTError:

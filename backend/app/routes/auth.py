@@ -1,6 +1,5 @@
 from fastapi import APIRouter
-from fastapi import Depends
-from app.middleware.auth_middleware import get_current_user
+from fastapi import Depends, HTTPException
 from app.middleware.auth_middleware import get_current_user
 from app.schemas.user_schema import (
     UserSignup,
@@ -43,7 +42,8 @@ def signup(user: UserSignup):
 
         "phone": "",
         "interested_in": "",
-        "tagline": ""
+        "tagline": "",
+        "gender": ""
     }
     users_collection.insert_one(user_data)
 
@@ -83,6 +83,8 @@ def login(user: UserLogin):
         "access_token": token,
         "token_type": "bearer"
     }
+
+
 @router.get("/profile")
 def profile(current_user: dict = Depends(get_current_user)):
 
@@ -91,11 +93,18 @@ def profile(current_user: dict = Depends(get_current_user)):
         "user": current_user
     }
 
+
 @router.put("/profile")
 def update_profile(
     profile: ProfileUpdate,
     current_user: dict = Depends(get_current_user)
 ):
+    existing_gender = current_user.get("gender", "")
+
+    if existing_gender:
+        new_gender = existing_gender
+    else:
+        new_gender = profile.gender or ""
 
     users_collection.update_one(
         {
@@ -106,7 +115,10 @@ def update_profile(
                 "name": profile.name,
                 "phone": profile.phone,
                 "interested_in": profile.interested_in,
-                "tagline": profile.tagline
+                "tagline": profile.tagline,
+                "gender": new_gender,
+                "honour": 50
+
             }
         }
     )

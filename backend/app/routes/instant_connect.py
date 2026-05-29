@@ -32,12 +32,12 @@ class ConnectionManager:
 
     async def wait_and_send(self, user_id: str, message: dict, timeout: int = 5):
         """WS connect hone ka wait karo, phir message bhejo"""
-        for _ in range(timeout * 10):  # har 100ms check karo
+        for _ in range(timeout * 10):
             if self.is_connected(user_id):
                 await self.send_message(user_id, message)
                 return True
             await asyncio.sleep(0.1)
-        return False  # timeout
+        return False
 
 
 manager = ConnectionManager()
@@ -45,8 +45,11 @@ manager = ConnectionManager()
 
 @router.post("/instant-connect/join")
 async def join_queue(
+    request_data: dict = {},
     current_user: dict = Depends(get_current_user)
 ):
+    gender_filter = request_data.get("gender_filter", "")
+
     existing = waiting_pool.find_one({
         "user_id": current_user["user_id"]
     })
@@ -57,10 +60,15 @@ async def join_queue(
             "message": "Already in queue"
         }
 
-    partner = waiting_pool.find_one_and_delete({
-        "user_id": {"$ne": current_user["user_id"]}
-    })
+    # Gender filter ke saath partner dhundo
+    query = {"user_id": {"$ne": current_user["user_id"]}}
 
+    if gender_filter:
+        query["gender"] = gender_filter
+
+    partner = waiting_pool.find_one_and_delete(query)
+
+    # Agar gender filter tha aur koi nahi mila
     if partner:
         session = sessions_collection.insert_one({
             "user_1": partner["user_id"],
@@ -80,7 +88,9 @@ async def join_queue(
             "email": current_user.get("email", ""),
             "phone": current_user.get("phone", ""),
             "interested_in": current_user.get("interested_in", ""),
-            "tagline": current_user.get("tagline", "")
+            "tagline": current_user.get("tagline", ""),
+            "gender": current_user.get("gender", ""),
+            "honour": current_user.get("honour", 50)
         }
 
         partner_details = {
@@ -88,10 +98,12 @@ async def join_queue(
             "email": partner_user.get("email", ""),
             "phone": partner_user.get("phone", ""),
             "interested_in": partner_user.get("interested_in", ""),
-            "tagline": partner_user.get("tagline", "")
+            "tagline": partner_user.get("tagline", ""),
+            "gender": partner_user.get("gender", ""),
+            "honour": partner_user.get("honour", 50)
         }
 
-        # Waiting user (partner) — caller hoga, abhi connected hai
+        # Waiting user (partner) — caller hoga
         await manager.send_message(partner["user_id"], {
             "status": "matched",
             "session_id": session_id,
@@ -100,8 +112,6 @@ async def join_queue(
             "partner_id": current_user["user_id"]
         })
 
-        # Joining user — receiver hoga
-        # WS abhi connected nahi ho sakta, isliye background mein wait karke bhejo
         joining_user_message = {
             "status": "matched",
             "session_id": session_id,
@@ -111,10 +121,8 @@ async def join_queue(
         }
 
         if manager.is_connected(current_user["user_id"]):
-            # WS already connected hai — seedha bhejo
             await manager.send_message(current_user["user_id"], joining_user_message)
         else:
-            # WS abhi connect nahi — background task mein wait karke bhejo
             asyncio.create_task(
                 manager.wait_and_send(current_user["user_id"], joining_user_message)
             )
@@ -124,9 +132,12 @@ async def join_queue(
             "session_id": session_id,
         }
 
+    # Koi partner nahi mila — queue mein daal do
     waiting_pool.insert_one({
         "user_id": current_user["user_id"],
         "email": current_user["email"],
+        "gender": current_user.get("gender", ""),
+        "gender_filter": gender_filter,
         "status": "waiting",
         "joined_at": datetime.now(timezone.utc)
     })
@@ -203,6 +214,81 @@ async def get_status(
     }
 
 
+@router.post("/instant-connect/rate")
+async def rate_partner(
+    rating_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    from bson import ObjectId
+
+    session_id = rating_data.get("session_id")
+    rating = rating_data.get("rating")
+
+    if not session_id or rating is None:
+        return {"message": "session_id and rating are required"}
+
+    if rating not in [-2, -1, 0, 1, 2]:
+        return {"message": "Invalid rating value"}
+
+    try:
+        session_obj_id = ObjectId(session_id)
+    except Exception:
+        return {"message": "Invalid session_id"}
+
+    session = sessions_collection.find_one({
+        "_id": session_obj_id
+    })
+
+    if not session:
+        return {"message": "Session not found"}
+
+    if session.get("status") != "ended":
+        return {"message": "Cannot rate an active session"}
+
+    if current_user["user_id"] not in [session["user_1"], session["user_2"]]:
+        return {"message": "Unauthorized — you were not part of this session"}
+
+    if session["user_1"] == current_user["user_id"]:
+        partner_id = session["user_2"]
+    else:
+        partner_id = session["user_1"]
+
+    if partner_id == current_user["user_id"]:
+        return {"message": "Cannot rate yourself"}
+
+    rated_by = session.get("rated_by", [])
+    if current_user["user_id"] in rated_by:
+        return {"message": "Already rated this session"}
+
+    partner = users_collection.find_one({
+        "_id": ObjectId(partner_id)
+    })
+
+    if not partner:
+        return {"message": "Partner not found"}
+
+    current_honour = partner.get("honour", 50)
+    new_honour = current_honour + rating
+
+    if new_honour < 0:
+        new_honour = 0
+
+    if new_honour > 200:
+        new_honour = 200
+
+    users_collection.update_one(
+        {"_id": ObjectId(partner_id)},
+        {"$set": {"honour": new_honour}}
+    )
+
+    sessions_collection.update_one(
+        {"_id": ObjectId(session_id)},
+        {"$push": {"rated_by": current_user["user_id"]}}
+    )
+
+    return {"message": "Rating submitted successfully"}
+
+
 @router.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     await manager.connect(user_id, websocket)
@@ -218,7 +304,6 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
     except WebSocketDisconnect:
         manager.disconnect(user_id)
 
-        # ✅ Yahan add karo — session dhundo aur partner ko notify karo
         session = sessions_collection.find_one({
             "$or": [
                 {"user_1": user_id},
@@ -243,5 +328,4 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                 "status": "partner_disconnected"
             })
 
-        # Queue se bhi hatao agar waiting mein tha
         waiting_pool.delete_one({"user_id": user_id})

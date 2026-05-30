@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.instant_connect import (
     router as instant_connect_router
 )
+from app.routes.chat import router as chat_router
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +23,7 @@ app.include_router(auth_router)
 app.include_router(
     instant_connect_router
 )
+app.include_router(chat_router)
 
 @app.get("/")
 def root():

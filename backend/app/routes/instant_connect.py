@@ -396,3 +396,60 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Qu
             })
 
         waiting_pool.delete_one({"user_id": user_id})
+
+
+# ---------------------------------------------------------------------------
+# Call History
+# ---------------------------------------------------------------------------
+
+@router.get("/call-history")
+def get_call_history(
+    current_user: dict = Depends(get_current_user),
+):
+    uid = current_user["user_id"]
+
+    raw_sessions = list(
+        sessions_collection.find(
+            {
+                "$or": [{"user_1": uid}, {"user_2": uid}],
+                "status": "ended",
+            }
+        ).sort("started_at", -1).limit(50)
+    )
+
+    history = []
+
+    for s in raw_sessions:
+        is_user1 = s["user_1"] == uid
+        partner_id = s["user_2"] if is_user1 else s["user_1"]
+
+        try:
+            partner_doc = users_collection.find_one({"_id": ObjectId(partner_id)})
+        except Exception:
+            partner_doc = None
+
+        partner_name = partner_doc.get("name", "Unknown") if partner_doc else "Unknown"
+        partner_gender = partner_doc.get("gender", "") if partner_doc else ""
+        partner_tagline = partner_doc.get("tagline", "") if partner_doc else ""
+
+        my_rating = s.get("ratings", {}).get(
+            "user_1_rating" if is_user1 else "user_2_rating"
+        )
+
+        started_at = s.get("started_at")
+        started_iso = started_at.isoformat() if started_at else None
+
+        history.append({
+            "session_id": str(s["_id"]),
+            "partner_id": partner_id,
+            "partner_name": partner_name,
+            "partner_gender": partner_gender,
+            "partner_tagline": partner_tagline,
+            "started_at": started_iso,
+            "duration_seconds": s.get("duration_seconds") or 0,
+            "my_rating": my_rating,
+            "three_min_mode": s.get("three_min_mode", False),
+            "disconnect_reason": s.get("disconnect_reason", ""),
+        })
+
+    return {"history": history}

@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 
 export default function InstantConnectPage() {
+
+  const router = useRouter();
 
   const [status, setStatus] = useState("idle");
   const [seconds, setSeconds] = useState(0);
@@ -20,6 +23,14 @@ export default function InstantConnectPage() {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const partnerIdRef = useRef<string>("");
+
+  // Auth check
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      router.push("/login");
+    }
+  }, []);
 
   const createPeerConnection = () => {
     if (pcRef.current) {
@@ -170,14 +181,26 @@ export default function InstantConnectPage() {
 
       const token = localStorage.getItem("token");
 
-const profileRes = await fetch("http://127.0.0.1:8000/profile", {
-  headers: { Authorization: `Bearer ${token}` },
-});
-const profileData = await profileRes.json();
+      const profileRes = await fetch("http://127.0.0.1:8000/profile", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const profileData = await profileRes.json();
 const userId = profileData.user?.user_id;
 
 if (!userId) {
   alert("Session expire ho gayi, dobara login karo!");
+  router.push("/login");
+  return;
+}
+
+// Profile complete check
+const user = profileData.user;
+const isProfileComplete =
+  user?.name && user?.gender && user?.phone && user?.tagline;
+
+if (!isProfileComplete) {
+  alert("Pehle apna profile complete karo! Name, gender, phone aur tagline zaroori hai.");
+  router.push("/profile");
   return;
 }
 
@@ -207,8 +230,7 @@ if (!userId) {
 
       if (data.status === "matched") {
         setStatus("matched");
-      }
-       else {
+      } else {
         setStatus("waiting");
       }
 

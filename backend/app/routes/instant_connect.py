@@ -6,10 +6,11 @@ from app.middleware.auth_middleware import get_current_user
 from jose import jwt, JWTError
 import asyncio
 import os
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+from typing import Literal
 
 class JoinRequest(BaseModel):
-    gender_filter: str = ""
+    gender_filter: Literal["male", "female", ""] = ""
 
 router = APIRouter()
 
@@ -88,8 +89,22 @@ class ConnectionManager:
                 await self.send_message(user_id, message)
                 return True
             await asyncio.sleep(0.1)
-        return False
 
+        # Timeout — joining user connect nahi hua
+        session_id = message.get("session_id")
+        partner_id = message.get("partner_id")
+
+        if session_id and partner_id:
+            session = sessions_collection.find_one({"_id": ObjectId(session_id)})
+            if session:
+                _end_session(session, disconnected_by=user_id, reason="ws_timeout")
+
+            await self.send_message(partner_id, {
+                "status": "partner_disconnected",
+                "reason": "ws_timeout",
+            })
+
+        return False
 
 manager = ConnectionManager()
 

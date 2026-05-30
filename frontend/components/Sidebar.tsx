@@ -36,6 +36,10 @@ export default function Sidebar() {
 <Link href="/call-history">
   Call History
 </Link>
+<Link href="/inbox">
+  Inbox
+</Link>
+
 
 
         <Link href="/profile">

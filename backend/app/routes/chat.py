@@ -64,10 +64,13 @@ def get_chat_history(
 ):
     uid = current_user["user_id"]
 
-    # Security: sirf call partners hi chat dekh sakte hain
+    try:
+        ObjectId(partner_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid partner ID")
+
     if not are_chat_partners(uid, partner_id):
         raise HTTPException(status_code=403, detail="Not authorized to view this chat")
-
     msgs = list(
         messages_collection.find(
             {
@@ -80,6 +83,11 @@ def get_chat_history(
         .sort("sent_at", 1)
         .limit(MAX_MESSAGES_FETCH)
     )
+    messages_collection.update_many(
+        {"sender_id": partner_id, "receiver_id": uid, "read": {"$ne": True}},
+        {"$set": {"read": True}}
+    )
+
 
     return {
         "messages": [
@@ -150,3 +158,61 @@ async def chat_websocket(
 
     except WebSocketDisconnect:
         manager.disconnect(user_id)
+
+
+@router.get("/chat/inbox")
+def get_inbox(current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
+
+    # Sirf wahi partners jinke saath session rahi ho
+    sessions = list(db.sessions.find({
+        "$or": [{"user_1": uid}, {"user_2": uid}],
+        "status": "ended"
+    }))
+
+    # Unique partner IDs nikalo
+    partner_ids = set()
+    for s in sessions:
+        pid = s["user_2"] if s["user_1"] == uid else s["user_1"]
+        partner_ids.add(pid)
+
+    inbox = []
+    for partner_id in partner_ids:
+        try:
+            partner = db.users.find_one({"_id": ObjectId(partner_id)})
+        except Exception:
+            continue
+        if not partner:
+            continue
+        # Last message fetch karo
+        last_msg = messages_collection.find_one(
+            {
+                "$or": [
+                    {"sender_id": uid, "receiver_id": partner_id},
+                    {"sender_id": partner_id, "receiver_id": uid},
+                ]
+            },
+            sort=[("sent_at", -1)]
+        )
+
+        # Unread count
+        unread_count = messages_collection.count_documents({
+            "sender_id": partner_id,
+            "receiver_id": uid,
+            "read": {"$ne": True}
+        })
+
+        inbox.append({
+            "partner_id": partner_id,
+            "partner_name": partner.get("name", ""),
+            "partner_gender": partner.get("gender", ""),
+            "partner_tagline": partner.get("tagline", ""),
+            "last_message": last_msg["text"] if last_msg else None,
+            "last_message_at": last_msg["sent_at"].isoformat() if last_msg else None,
+            "last_message_mine": last_msg["sender_id"] == uid if last_msg else False,
+            "unread_count": unread_count,
+        })
+
+    # Latest conversation pehle
+    inbox.sort(key=lambda x: x["last_message_at"] or "", reverse=True)
+    return {"inbox": inbox}

@@ -40,6 +40,9 @@ export default function Sidebar() {
   Inbox
 </Link>
 
+<Link href="/rooms">
+  Rooms
+</Link>
 
 
         <Link href="/profile">

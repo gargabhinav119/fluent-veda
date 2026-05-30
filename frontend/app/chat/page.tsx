@@ -15,8 +15,9 @@ interface Message {
 export default function ChatPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const partnerId = params.get("userId") ?? "";
-  const partnerName = params.get("name") ?? "Unknown";
+    const partnerId = params.get("userId") ?? "";
+    if (!partnerId) router.push("/inbox");
+  const partnerName = (params.get("name") ?? "Unknown").slice(0, 50).replace(/[<>]/g, "");
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");

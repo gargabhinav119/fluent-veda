@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, Query
 from datetime import datetime, timezone
 from bson import ObjectId
 from app.config.db import db
 from app.middleware.auth_middleware import get_current_user
+from jose import jwt, JWTError
 import asyncio
+import os
+from pydantic import BaseModel
+
+class JoinRequest(BaseModel):
+    gender_filter: str = ""
 
 router = APIRouter()
 
@@ -19,8 +25,6 @@ users_collection = db.users
 def _user_details(user: dict) -> dict:
     return {
         "name": user.get("name", ""),
-        "email": user.get("email", ""),
-        "phone": user.get("phone", ""),
         "interested_in": user.get("interested_in", ""),
         "tagline": user.get("tagline", ""),
         "gender": user.get("gender", ""),
@@ -29,11 +33,6 @@ def _user_details(user: dict) -> dict:
 
 
 def _end_session(session: dict, disconnected_by: str, reason: str) -> int:
-    """
-    Session ko ended mark karo.
-    duration_seconds calculate karke store karo.
-    Returns duration in seconds.
-    """
     now = datetime.now(timezone.utc)
     started_at = session.get("started_at")
 
@@ -84,7 +83,6 @@ class ConnectionManager:
                 self.disconnect(user_id)
 
     async def wait_and_send(self, user_id: str, message: dict, timeout: int = 5) -> bool:
-        """WS connect hone ka wait karo, phir message bhejo."""
         for _ in range(timeout * 10):
             if self.is_connected(user_id):
                 await self.send_message(user_id, message)
@@ -102,20 +100,27 @@ manager = ConnectionManager()
 
 @router.post("/instant-connect/join")
 async def join_queue(
-    request_data: dict = {},
+    request_data: JoinRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    gender_filter = request_data.get("gender_filter", "")
+    gender_filter = request_data.gender_filter
 
-    # Already queue mein hai?
     existing = waiting_pool.find_one({"user_id": current_user["user_id"]})
     if existing:
         return {"status": "waiting", "message": "Already in queue"}
 
-    # Partner dhundo
     query = {"user_id": {"$ne": current_user["user_id"]}}
+
+    # Joining user ka filter — partner ki gender sahi honi chahiye
     if gender_filter:
         query["gender"] = gender_filter
+
+    # Waiting user ka filter bhi check karo
+    # Ya toh unka koi filter nahi, ya unka filter joining user ki gender se match kare
+    query["$or"] = [
+        {"gender_filter": ""},
+        {"gender_filter": current_user.get("gender", "")}
+    ]
 
     partner = waiting_pool.find_one_and_delete(query)
 
@@ -123,8 +128,8 @@ async def join_queue(
         now = datetime.now(timezone.utc)
 
         session = sessions_collection.insert_one({
-            "user_1": partner["user_id"],       # jo pehle wait kar raha tha — caller banega
-            "user_2": current_user["user_id"],  # jo abhi join hua
+            "user_1": partner["user_id"],
+            "user_2": current_user["user_id"],
             "status": "active",
             "started_at": now,
             "ended_at": None,
@@ -147,7 +152,6 @@ async def join_queue(
         current_user_details = _user_details(current_user)
         partner_details = _user_details(partner_user)
 
-        # Waiting user (partner) — caller hoga
         await manager.send_message(partner["user_id"], {
             "status": "matched",
             "session_id": session_id,
@@ -173,7 +177,6 @@ async def join_queue(
 
         return {"status": "matched", "session_id": session_id}
 
-    # Koi partner nahi mila — queue mein daal do
     waiting_pool.insert_one({
         "user_id": current_user["user_id"],
         "email": current_user["email"],
@@ -289,15 +292,18 @@ async def rate_partner(
     partner_id = session["user_2"] if is_user1 else session["user_1"]
     rating_field = "ratings.user_1_rating" if is_user1 else "ratings.user_2_rating"
 
-    partner = users_collection.find_one({"_id": ObjectId(partner_id)})
-    if not partner:
-        return {"message": "Partner not found"}
+    # Bug fix 1 — self rating check
+    if partner_id == uid:
+        return {"message": "Unauthorized — you cannot rate yourself"}
 
-    new_honour = max(0, min(200, partner.get("honour", 50) + rating))
-
+    # Bug fix 2 — atomic honour update, no race condition
     users_collection.update_one(
         {"_id": ObjectId(partner_id)},
-        {"$set": {"honour": new_honour}},
+        [
+            {"$set": {"honour": {
+                "$max": [0, {"$min": [200, {"$add": ["$honour", rating]}]}]
+            }}}
+        ]
     )
 
     sessions_collection.update_one(
@@ -316,7 +322,16 @@ async def rate_partner(
 # ---------------------------------------------------------------------------
 
 @router.websocket("/ws/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: str):
+async def websocket_endpoint(websocket: WebSocket, user_id: str, token: str = Query(...)):
+    try:
+        payload = jwt.decode(token, os.getenv("JWT_SECRET"), algorithms=["HS256"])
+        if payload.get("user_id") != user_id:
+            await websocket.close(code=4001)
+            return
+    except JWTError:
+        await websocket.close(code=4001)
+        return
+
     await manager.connect(user_id, websocket)
 
     try:

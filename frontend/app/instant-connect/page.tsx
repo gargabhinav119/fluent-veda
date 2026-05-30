@@ -169,10 +169,20 @@ export default function InstantConnectPage() {
       localStreamRef.current = stream;
 
       const token = localStorage.getItem("token");
-      const userId = JSON.parse(atob(token!.split(".")[1])).user_id;
+
+const profileRes = await fetch("http://127.0.0.1:8000/profile", {
+  headers: { Authorization: `Bearer ${token}` },
+});
+const profileData = await profileRes.json();
+const userId = profileData.user?.user_id;
+
+if (!userId) {
+  alert("Session expire ho gayi, dobara login karo!");
+  return;
+}
 
       await new Promise<void>((resolve) => {
-        const ws = new WebSocket(`ws://127.0.0.1:8000/ws/${userId}`);
+        const ws = new WebSocket(`ws://127.0.0.1:8000/ws/${userId}?token=${token}`);
         ws.onopen = () => {
           wsRef.current = ws;
           setupWsHandlers(ws);

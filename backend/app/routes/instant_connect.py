@@ -11,6 +11,8 @@ from typing import Literal
 
 class JoinRequest(BaseModel):
     gender_filter: Literal["male", "female", ""] = ""
+    three_min_mode: bool = False
+
 
 router = APIRouter()
 
@@ -119,6 +121,7 @@ async def join_queue(
     current_user: dict = Depends(get_current_user),
 ):
     gender_filter = request_data.gender_filter
+    three_min_mode = request_data.three_min_mode
 
     existing = waiting_pool.find_one({"user_id": current_user["user_id"]})
     if existing:
@@ -131,12 +134,13 @@ async def join_queue(
         query["gender"] = gender_filter
 
     # Waiting user ka filter bhi check karo
-    # Ya toh unka koi filter nahi, ya unka filter joining user ki gender se match kare
     query["$or"] = [
         {"gender_filter": ""},
         {"gender_filter": current_user.get("gender", "")}
     ]
 
+    # 3 min mode — sirf same mode wale se match karo
+    query["three_min_mode"] = three_min_mode
     partner = waiting_pool.find_one_and_delete(query)
 
     if partner:
@@ -148,6 +152,7 @@ async def join_queue(
             "status": "active",
             "started_at": now,
             "ended_at": None,
+            "three_min_mode": three_min_mode,
             "duration_seconds": None,
             "disconnected_by": None,
             "disconnect_reason": None,
@@ -173,6 +178,7 @@ async def join_queue(
             "partner": current_user_details,
             "is_caller": True,
             "partner_id": current_user["user_id"],
+            "three_min_mode": three_min_mode,
         })
 
         joining_user_message = {
@@ -181,6 +187,7 @@ async def join_queue(
             "partner": partner_details,
             "is_caller": False,
             "partner_id": partner["user_id"],
+            "three_min_mode": three_min_mode,
         }
 
         if manager.is_connected(current_user["user_id"]):
@@ -198,6 +205,7 @@ async def join_queue(
         "gender": current_user.get("gender", ""),
         "gender_filter": gender_filter,
         "status": "waiting",
+        "three_min_mode": three_min_mode,
         "joined_at": datetime.now(timezone.utc),
     })
 

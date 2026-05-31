@@ -139,6 +139,13 @@ def create_room(
     description = data.description.strip()[:200]
     if not name:
         raise HTTPException(status_code=400, detail="Room name is required")
+   
+    active_room_count = rooms_collection.count_documents({"status": "active"})
+    if active_room_count >= 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 10 rooms allowed at a time."
+        )
 
     existing = rooms_collection.find_one({
         "host_id": current_user["user_id"],
@@ -157,7 +164,7 @@ def create_room(
         "status": "active",
         "created_at": now,
         "ended_at": None,
-        "max_listeners": 10,
+        "max_participants": 10,
         "participant_count_cache": 1,
     })
 
@@ -188,7 +195,7 @@ def get_rooms(current_user: dict = Depends(get_current_user)):
             "host_name": r["host_name"],
             "host_id": r["host_id"],
             "participant_count": r.get("participant_count_cache", 1),
-            "max_listeners": r.get("max_listeners", 10),
+            "max_participants": r.get("max_participants", 10),
             "created_at": r["created_at"].isoformat(),
         })
     return {"rooms": rooms}
@@ -241,13 +248,13 @@ def join_room(
     if already:
         return {"message": "Already in room", "role": already["role"]}
 
-    listener_count = participants_collection.count_documents({
-        "room_id": room_id,
-        "role": "listener",
-        "left_at": None
+    total_count = participants_collection.count_documents({
+    "room_id": room_id,
+    "left_at": None
     })
-    if listener_count >= room.get("max_listeners", 10):
+    if total_count >= room.get("max_participants", 10):
         raise HTTPException(status_code=400, detail="Room is full")
+
 
     participants_collection.insert_one({
         "room_id": room_id,

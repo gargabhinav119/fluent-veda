@@ -28,6 +28,18 @@ export default function Sidebar() {
         Dashboard
       </Link>
 
+<Link href="/vocabulary">
+  Vocabulary
+</Link>
+
+<Link href="/grammar">
+  Grammar
+</Link>
+
+<Link href="/quiz">
+  Quiz
+</Link>
+
 
 <Link href="/instant-connect">
   Instant Connect

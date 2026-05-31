@@ -68,7 +68,9 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [handRaised, setHandRaised] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [isChatBanned, setIsChatBanned] = useState(false);
+  const [chatBannedUsers, setChatBannedUsers] = useState<Set<string>>(new Set());
+    const [loading, setLoading] = useState(true);
   const [initError, setInitError] = useState("");
   const [roomEnded, setRoomEnded] = useState(false);
 
@@ -301,12 +303,36 @@ if (role === "host" || role === "speaker") {
             setMessages((prev) => [...prev, data]);
             break;
 
-          case "room_ended":
+case "room_ended":
             setRoomEnded(true);
             await cleanupAgora();
             setTimeout(() => router.push("/rooms"), 3000);
             break;
-        }
+
+          case "you_are_chat_banned":
+            setIsChatBanned(true);
+            break;
+
+          case "you_are_chat_unbanned":
+            setIsChatBanned(false);
+            break;
+
+          case "chat_blocked":
+            // Silently ignore — input already disabled
+            break;
+
+          case "participant_chat_banned":
+            setChatBannedUsers((prev) => new Set([...prev, data.user_id]));
+            break;
+
+          case "participant_chat_unbanned":
+            setChatBannedUsers((prev) => {
+              const next = new Set(prev);
+              next.delete(data.user_id);
+              return next;
+            });
+            break;
+                  }
       };
 
       ws.onopen = () => setLoading(false);
@@ -474,15 +500,30 @@ if (role === "host" || role === "speaker") {
                         🎧 Back to Listener
                       </button>
                     )}
-                    {myRole === "host" && p.role === "speaker" && p.user_id !== myId && (
-                      <button
-                        onClick={() => sendWs({ type: "force_demote", user_id: p.user_id })}
-                        className="text-xs text-red-500 border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50 transition-colors"
-                      >
-                        Demote
-                      </button>
+{myRole === "host" && p.role === "speaker" && p.user_id !== myId && (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => sendWs({ type: "force_demote", user_id: p.user_id })}
+                          className="text-xs text-red-500 border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                        >
+                          Demote
+                        </button>
+                        <button
+                          onClick={() => sendWs({
+                            type: chatBannedUsers.has(p.user_id) ? "chat_unban" : "chat_ban",
+                            user_id: p.user_id
+                          })}
+                          className={`text-xs px-3 py-1 rounded-lg border transition-colors ${
+                            chatBannedUsers.has(p.user_id)
+                              ? "text-green-600 border-green-200 hover:bg-green-50"
+                              : "text-orange-500 border-orange-200 hover:bg-orange-50"
+                          }`}
+                        >
+                          {chatBannedUsers.has(p.user_id) ? "Unban Chat" : "Mute Chat"}
+                        </button>
+                      </div>
                     )}
-                  </div>
+                                      </div>
                 ))}
               </div>
             </div>
@@ -518,15 +559,32 @@ if (role === "host" || role === "speaker") {
                         {handRaised ? "✋ Raised" : "✋ Raise Hand"}
                       </button>
                     )}
-                    {myRole === "host" && p.handRaised && (
-                      <button
-                        onClick={() => promoteUser(p.user_id)}
-                        className="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg transition-colors"
-                      >
-                        Accept
-                      </button>
+{myRole === "host" && (
+                      <div className="flex gap-1">
+                        {p.handRaised && (
+                          <button
+                            onClick={() => promoteUser(p.user_id)}
+                            className="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            Accept
+                          </button>
+                        )}
+                        <button
+                          onClick={() => sendWs({
+                            type: chatBannedUsers.has(p.user_id) ? "chat_unban" : "chat_ban",
+                            user_id: p.user_id
+                          })}
+                          className={`text-xs px-3 py-1 rounded-lg border transition-colors ${
+                            chatBannedUsers.has(p.user_id)
+                              ? "text-green-600 border-green-200 hover:bg-green-50"
+                              : "text-orange-500 border-orange-200 hover:bg-orange-50"
+                          }`}
+                        >
+                          {chatBannedUsers.has(p.user_id) ? "Unban Chat" : "Mute Chat"}
+                        </button>
+                      </div>
                     )}
-                  </div>
+                                      </div>
                 ))}
               </div>
             </div>
@@ -582,23 +640,31 @@ if (role === "host" || role === "speaker") {
               <div ref={bottomRef} />
             </div>
             <div className="px-4 py-3 border-t border-gray-100 flex gap-2 flex-shrink-0">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
-                placeholder="Type a message..."
-                maxLength={500}
-                className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-gray-400 bg-gray-50"
-              />
-              <button
-                onClick={sendChat}
-                disabled={!chatInput.trim()}
-                className="bg-black text-white px-4 py-2 rounded-xl text-sm disabled:opacity-40 hover:bg-gray-800 transition-colors"
-              >
-                →
-              </button>
-            </div>
+{isChatBanned ? (
+                <div className="flex-1 text-center text-xs text-red-400 py-2">
+                  🚫 You are muted from chat by the host
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
+                    placeholder="Type a message..."
+                    maxLength={500}
+                    className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-gray-400 bg-gray-50"
+                  />
+                  <button
+                    onClick={sendChat}
+                    disabled={!chatInput.trim()}
+                    className="bg-black text-white px-4 py-2 rounded-xl text-sm disabled:opacity-40 hover:bg-gray-800 transition-colors"
+                  >
+                    →
+                  </button>
+                </>
+              )}
+                          </div>
           </div>
         </div>
       </div>

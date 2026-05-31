@@ -476,6 +476,18 @@ async def room_websocket(
                 if not text:
                     continue
 
+                # Chat ban check
+                is_chat_banned = db.room_chat_banned.find_one({
+                    "room_id": room_id,
+                    "user_id": user_id,
+                })
+                if is_chat_banned:
+                    await room_manager.send(room_id, user_id, {
+                        "type": "chat_blocked",
+                        "reason": "You are banned from chatting in this room.",
+                    })
+                    continue
+
                 now = datetime.now(timezone.utc)
                 result = messages_collection.insert_one({
                     "room_id": room_id,
@@ -589,6 +601,68 @@ async def room_websocket(
                     "type": "role_changed",
                     "user_id": target_id,
                     "new_role": "listener",
+                })
+
+            elif msg_type == "chat_ban":
+                fresh_room = _get_room(room_id)
+                if not fresh_room or fresh_room["host_id"] != user_id:
+                    continue
+
+                target_id = data.get("user_id", "").strip()
+                if not target_id or target_id == user_id:
+                    continue
+
+                target = _get_active_room_participant(room_id, target_id)
+                if not target:
+                    continue
+
+                already_banned = db.room_chat_banned.find_one({
+                    "room_id": room_id,
+                    "user_id": target_id,
+                })
+                if already_banned:
+                    continue
+
+                db.room_chat_banned.insert_one({
+                    "room_id": room_id,
+                    "user_id": target_id,
+                    "user_name": target["user_name"],
+                    "banned_at": datetime.now(timezone.utc),
+                    "banned_by": user_id,
+                })
+
+                await room_manager.send(room_id, target_id, {
+                    "type": "you_are_chat_banned",
+                })
+
+                await room_manager.broadcast(room_id, {
+                    "type": "participant_chat_banned",
+                    "user_id": target_id,
+                    "user_name": target["user_name"],
+                })
+
+            elif msg_type == "chat_unban":
+                fresh_room = _get_room(room_id)
+                if not fresh_room or fresh_room["host_id"] != user_id:
+                    continue
+
+                target_id = data.get("user_id", "").strip()
+                if not target_id:
+                    continue
+
+                db.room_chat_banned.delete_one({
+                    "room_id": room_id,
+                    "user_id": target_id,
+                })
+
+                await room_manager.send(room_id, target_id, {
+                    "type": "you_are_chat_unbanned",
+                })
+
+                await room_manager.broadcast(room_id, {
+                    "type": "participant_chat_unbanned",
+                    "user_id": target_id,
+                    "user_name": target["user_name"],
                 })
 
             elif msg_type in ["offer", "answer", "ice-candidate"]:

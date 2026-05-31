@@ -163,9 +163,9 @@ export default function ChatPage() {
           </div>
           <div>
             <p className="font-semibold text-gray-900 text-sm">{partnerName}</p>
-            <p className="text-xs text-gray-400">
+            {/* <p className="text-xs text-gray-400">
               {wsReady ? "Online" : "Connecting..."}
-            </p>
+            </p> */}
           </div>
         </div>
 

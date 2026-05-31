@@ -60,6 +60,21 @@ def _get_user_honour(user_id: str) -> int:
     except Exception:
         return 0
 
+def _cleanup_room(room_id: str):
+    db.room_chat_banned.delete_many({"room_id": room_id})
+    db.room_hand_raises.delete_many({"room_id": room_id, "status": "pending"})
+
+def _cleanup_user_from_room(room_id: str, user_id: str):
+    db.room_hand_raises.delete_many({
+        "room_id": room_id,
+        "user_id": user_id,
+        "status": "pending"
+    })
+    db.room_chat_banned.delete_one({
+        "room_id": room_id,
+        "user_id": user_id,
+    })
+
 
 # ---------------------------------------------------------------------------
 # Room Connection Manager
@@ -143,6 +158,7 @@ def create_room(
         "created_at": now,
         "ended_at": None,
         "max_listeners": 10,
+        "participant_count_cache": 1,
     })
 
     room_id = str(result.inserted_id)
@@ -165,17 +181,13 @@ def get_rooms(current_user: dict = Depends(get_current_user)):
     rooms = []
     for r in raw:
         room_id = str(r["_id"])
-        count = participants_collection.count_documents({
-            "room_id": room_id,
-            "left_at": None
-        })
         rooms.append({
             "room_id": room_id,
             "name": r["name"],
             "description": r.get("description", ""),
             "host_name": r["host_name"],
             "host_id": r["host_id"],
-            "participant_count": count,
+            "participant_count": r.get("participant_count_cache", 1),
             "max_listeners": r.get("max_listeners", 10),
             "created_at": r["created_at"].isoformat(),
         })
@@ -246,6 +258,11 @@ def join_room(
         "left_at": None,
     })
 
+    rooms_collection.update_one(
+        {"_id": ObjectId(room_id)},
+        {"$inc": {"participant_count_cache": 1}}
+    )
+
     return {"message": "Joined successfully", "role": "listener"}
 
 
@@ -266,6 +283,13 @@ def leave_room(
         {"$set": {"left_at": now}}
     )
 
+    rooms_collection.update_one(
+        {"_id": ObjectId(room_id)},
+        {"$inc": {"participant_count_cache": -1}}
+    )
+
+    _cleanup_user_from_room(room_id, uid)
+
     if room["host_id"] == uid:
         rooms_collection.update_one(
             {"_id": ObjectId(room_id)},
@@ -275,6 +299,7 @@ def leave_room(
             {"room_id": room_id, "left_at": None},
             {"$set": {"left_at": now}}
         )
+        _cleanup_room(room_id)
         return {"message": "Room ended"}
 
     return {"message": "Left room"}
@@ -476,7 +501,6 @@ async def room_websocket(
                 if not text:
                     continue
 
-                # Chat ban check
                 is_chat_banned = db.room_chat_banned.find_one({
                     "room_id": room_id,
                     "user_id": user_id,
@@ -680,6 +704,13 @@ async def room_websocket(
             {"$set": {"left_at": now}}
         )
 
+        rooms_collection.update_one(
+            {"_id": ObjectId(room_id)},
+            {"$inc": {"participant_count_cache": -1}}
+        )
+
+        _cleanup_user_from_room(room_id, user_id)
+
         fresh_room = rooms_collection.find_one({"_id": ObjectId(room_id)})
         if not fresh_room:
             return
@@ -693,6 +724,7 @@ async def room_websocket(
                 {"room_id": room_id, "left_at": None},
                 {"$set": {"left_at": now}}
             )
+            _cleanup_room(room_id)
             await room_manager.broadcast(room_id, {
                 "type": "room_ended",
                 "reason": "host_left",
